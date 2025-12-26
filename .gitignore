@@ -3,3 +3,9 @@
 /build
 /dist
 /*.egg-info
+
+# sample folder to ignore
+/sample/
+
+# __pycache__
+/lightning_whisper_mlx/__pycache__/

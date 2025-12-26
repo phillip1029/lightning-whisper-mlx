@@ -51,6 +51,27 @@ print(text)
 
 - The default batch_size is `12`, higher is better for throughput but you might run into memory issues. The heuristic is it really depends on the size of the model. If you are running the smaller models, then higher batch size, larger models, lower batch size. Also keep in mind your unified memory!
 
+### Audio Processing
+
+For audio processing functionality (chunking, format conversion, etc.), you'll need to install `ffmpeg` separately:
+
+**Using conda:**
+```bash
+conda install -c conda-forge ffmpeg
+```
+
+**Using Homebrew (macOS):**
+```bash
+brew install ffmpeg
+```
+
+**Using apt (Ubuntu/Debian):**
+```bash
+sudo apt install ffmpeg
+```
+
+**Note for Python 3.13+:** The `audioop` module was removed from Python's standard library in version 3.13. This package includes `audioop-lts` as a dependency to maintain compatibility.
+
 ## Credits
 
 - [Mustafa](https://github.com/mustafaaljadery) - Creator of Lightning Whisper MLX

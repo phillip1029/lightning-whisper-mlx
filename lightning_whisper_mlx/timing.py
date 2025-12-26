@@ -109,6 +109,18 @@ class WordTiming:
     probability: float
 
 
+def _as_int(x):
+    """
+    Convert possible scalar containers (mx scalar, numpy scalar, python number)
+    to a plain Python int, to safely index Python lists.
+    """
+    try:
+        x = x.item()
+    except Exception:
+        pass
+    return int(x)
+
+
 def find_alignment(
     model: "Whisper",
     tokenizer: Tokenizer,
@@ -144,7 +156,7 @@ def find_alignment(
 
     # heads * tokens * frames
     weights = mx.stack(
-        [cross_qk[_l.item()][0, _h.item()] for _l, _h in model.alignment_heads]
+        [cross_qk[_as_int(_l)][0, _as_int(_h)] for _l, _h in model.alignment_heads]
     )
     weights = weights[:, :, : num_frames // 2]
     weights = mx.softmax(weights * qk_scale, axis=-1)

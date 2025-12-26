@@ -76,7 +76,7 @@ def transcribe_audio(
     append_punctuations: str = "\"'.。,，!！?？:：”)]}、",
     clip_timestamps: Union[str, List[float]] = "0",
     hallucination_silence_threshold: Optional[float] = None,
-    batch_size: 6,
+    batch_size: int = 6,
     **decode_options,
 ):
     """
@@ -258,23 +258,37 @@ def transcribe_audio(
         initial_prompt_tokens = []
 
     def new_segment(
-        *, start: float, end: float, tokens: mx.array, result: DecodingResult
+        *,
+        start: float,
+        end: float,
+        tokens: mx.array,
+        result: DecodingResult,
+        seek_start: int,
     ):
         tokens = tokens.tolist()
         text_tokens = [token for token in tokens if token < tokenizer.eot]
         return {
-            "seek": seek,
+            "seek": seek_start,
             "start": start,
             "end": end,
             "text": tokenizer.decode(text_tokens),
             "tokens": tokens,
-            "temperature": res.temperature,
-            "avg_logprob": res.avg_logprob,
-            "compression_ratio": res.compression_ratio,
-            "no_speech_prob": res.no_speech_prob,
+            "temperature": result.temperature,
+            "avg_logprob": result.avg_logprob,
+            "compression_ratio": result.compression_ratio,
+            "no_speech_prob": result.no_speech_prob,
+            "words": [],
         }
     
-    def format_output(tokens, res):
+    def format_output(
+        tokens,
+        res,
+        *,
+        time_offset: float,
+        segment_size: int,
+        segment_duration: float,
+        seek_start: int,
+    ):
         seek = 0
         current_segments = []
 
@@ -348,6 +362,7 @@ def transcribe_audio(
                         end=time_offset + end_timestamp_pos * time_precision,
                         tokens=sliced_tokens,
                         result=res,
+                        seek_start=seek_start,
                     )
                 )
                 last_slice = current_slice
@@ -377,6 +392,7 @@ def transcribe_audio(
                     end=time_offset + duration,
                     tokens=tokens,
                     result=res,
+                    seek_start=seek_start,
                 )
             )
             seek += segment_size
@@ -394,11 +410,16 @@ def transcribe_audio(
 
     seek_clip_end = seek_clips[0][1]
     seek = -3000
+    last_speech_timestamp = 0.0
+
     while seek < seek_clip_end:
-        time_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
 
         mel_segments = []
         mel_timestamps = []
+        segment_sizes = []
+        segment_durations = []
+        segment_time_offsets = []
+        segment_seek_starts = []
 
         for _ in range(batch_size):
             seek +=  N_FRAMES
@@ -413,6 +434,10 @@ def transcribe_audio(
             mel_segment = pad_or_trim(mel_segment, N_FRAMES, axis=-2).astype(dtype)
             mel_segments.append(mel_segment)
             mel_timestamps.append((seek, seek + segment_size))
+            segment_sizes.append(segment_size)
+            segment_durations.append(segment_duration)
+            segment_time_offsets.append(float(seek * HOP_LENGTH / SAMPLE_RATE))
+            segment_seek_starts.append(seek)
         
         if not len(mel_segments):
             break
@@ -423,16 +448,40 @@ def transcribe_audio(
 
         for index, res in enumerate(result):
             start_seek, end_seek = mel_timestamps[index]
+            segment_size = segment_sizes[index]
+            segment_duration = segment_durations[index]
+            time_offset = segment_time_offsets[index]
+            seek_start = segment_seek_starts[index]
 
             tokens = np.array(res.tokens)
-            current_segments, value_seek = format_output(tokens, res) 
+            current_segments, value_seek = format_output(
+                tokens,
+                res,
+                time_offset=time_offset,
+                segment_size=segment_size,
+                segment_duration=segment_duration,
+                seek_start=seek_start,
+            )
+
+            if word_timestamps:
+                add_word_timestamps(
+                    segments=current_segments,
+                    model=model,
+                    tokenizer=tokenizer,
+                    mel=mel_segments[index],
+                    num_frames=segment_size,
+                    prepend_punctuations=prepend_punctuations,
+                    append_punctuations=append_punctuations,
+                    last_speech_timestamp=last_speech_timestamp,
+                )
+                last_speech_timestamp = _get_end(current_segments) or last_speech_timestamp
 
             tokens =  [token
                     for segment in current_segments
                     for token in segment["tokens"]
             ]
 
-            all_segments.append([start_seek, end_seek,tokenizer.decode(tokens)])
+            all_segments.extend(current_segments)
                
             all_tokens.extend(
                 [
